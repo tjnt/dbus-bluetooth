@@ -5,6 +5,7 @@ module Network.Bluetooth
     , Device (..)
     , BluetoothError (..)
     , newClient
+    , closeClient
     , devices
     , connect
     , disconnect
@@ -28,14 +29,13 @@ import           DBus               (BusName, IsVariant, MemberName,
                                      dictionaryItems, fromVariant, methodCall,
                                      methodCallBody, methodCallDestination,
                                      methodReturnBody, toVariant)
-import           DBus.Client        (Client, ClientError (..), call_,
-                                     connectSystem)
+import qualified DBus.Client        as C
 import qualified DBus.Introspection as I
 import qualified Data.Map           as M
 import           Data.Maybe         (listToMaybe, mapMaybe)
 import           Data.Typeable      (Typeable)
 
-newtype DBusClient = DBusClient Client
+newtype DBusClient = DBusClient C.Client
 
 data Device = Device
     { devObjectPath       :: ObjectPath
@@ -84,15 +84,18 @@ exceptionHandlers =
     , Handler replyDataErrorHandler
     ]
   where
-    clientErrorHandler :: ClientError -> IO a
+    clientErrorHandler :: C.ClientError -> IO a
     clientErrorHandler ex =
-        throwIO . bluetoothError $ "ClientError: " ++ clientErrorMessage ex
+        throwIO . bluetoothError $ "ClientError: " ++ C.clientErrorMessage ex
     replyDataErrorHandler :: InvalidDataError -> IO a
     replyDataErrorHandler ex =
         throwIO . bluetoothError $ "InvalidDataError: " ++ invalidDataErrorMessage ex
 
 newClient :: IO DBusClient
-newClient = DBusClient <$> connectSystem
+newClient = DBusClient <$> C.connectSystem
+
+closeClient :: DBusClient -> IO ()
+closeClient (DBusClient client) = C.disconnect client
 
 devices :: DBusClient -> IO [Device]
 devices (DBusClient client) = do
@@ -131,7 +134,7 @@ startDiscovery :: DBusClient -> IO ()
 startDiscovery (DBusClient client) = do
     apaths <- getAdapterPaths client
     mapM_ (\path -> do
-        void $ call_ client (methodCall path "org.bluez.Adapter1" "StartDiscovery")
+        void $ C.call_ client (methodCall path "org.bluez.Adapter1" "StartDiscovery")
             { methodCallDestination = Just "org.bluez"
             }
         `catches` exceptionHandlers) apaths
@@ -140,14 +143,14 @@ stopDiscovery :: DBusClient -> IO ()
 stopDiscovery (DBusClient client) = do
     apaths <- getAdapterPaths client
     mapM_ (\path -> do
-        void $ call_ client (methodCall path "org.bluez.Adapter1" "StopDiscovery")
+        void $ C.call_ client (methodCall path "org.bluez.Adapter1" "StopDiscovery")
             { methodCallDestination = Just "org.bluez"
             }
         `catches` exceptionHandlers) apaths
 
 deviceMethodCall :: MemberName -> DBusClient -> Device -> IO ()
 deviceMethodCall memberName (DBusClient client) Device { devObjectPath = path } = do
-    void $ call_ client (methodCall path "org.bluez.Device1" memberName)
+    void $ C.call_ client (methodCall path "org.bluez.Device1" memberName)
         { methodCallDestination = Just "org.bluez"
         }
     `catches` exceptionHandlers
@@ -157,7 +160,7 @@ adapterMethodCall memberName (DBusClient client)
         Device { devObjectPath = dpath, devAdapter = madapter } = do
     apath <- maybe
         (throwIO $ invalidDataError "adapter not found on device" dpath) return madapter
-    void $ call_ client (methodCall apath "org.bluez.Adapter1" memberName)
+    void $ C.call_ client (methodCall apath "org.bluez.Adapter1" memberName)
         { methodCallDestination = Just "org.bluez"
         , methodCallBody = map toVariant [ dpath ]
         }
@@ -169,20 +172,20 @@ devicePropertiesSet name value (DBusClient client)
     dbusSet client path "org.bluez.Device1" name value
     `catches` exceptionHandlers
 
-getAdapterPaths :: Client -> IO [ObjectPath]
+getAdapterPaths :: C.Client -> IO [ObjectPath]
 getAdapterPaths client = do
     bluez <- introspectBluez client "/org/bluez"
     adapters <- mapM (introspectBluez client . I.objectPath)
              $ I.objectChildren bluez
     return $ map I.objectPath adapters
 
-getDevicePaths :: Client -> IO [ObjectPath]
+getDevicePaths :: C.Client -> IO [ObjectPath]
 getDevicePaths client = do
     paths <- getAdapterPaths client
     concatMap (map I.objectPath . I.objectChildren)
       <$> mapM (introspectBluez client) paths
 
-getDeviceInfo :: Client -> ObjectPath -> IO Device
+getDeviceInfo :: C.Client -> ObjectPath -> IO Device
 getDeviceInfo client path = do
     toDevice path . M.fromList . mapMaybe convProp . dictionaryItems
         <$> dbusGetAll client path "org.bluez.Device1"
@@ -216,9 +219,9 @@ toDevice path m =
   where
     getV s = fromVariant =<< m M.!? s
 
-dbusGetAll :: (IsVariant a) => Client -> ObjectPath -> String -> IO a
+dbusGetAll :: (IsVariant a) => C.Client -> ObjectPath -> String -> IO a
 dbusGetAll client path target = do
-    reply <- call_ client (methodCall path "org.freedesktop.DBus.Properties" "GetAll")
+    reply <- C.call_ client (methodCall path "org.freedesktop.DBus.Properties" "GetAll")
         { methodCallDestination = Just "org.bluez"
         , methodCallBody = map toVariant [ target ]
         }
@@ -232,16 +235,16 @@ dbusGetAll client path target = do
 --         }
 --     either throwIO return $ convertMethodReturn reply
 
-dbusSet :: (IsVariant a) => Client -> ObjectPath -> String -> String -> a -> IO ()
+dbusSet :: (IsVariant a) => C.Client -> ObjectPath -> String -> String -> a -> IO ()
 dbusSet client path target name value = do
-    void $ call_ client (methodCall path "org.freedesktop.DBus.Properties" "Set")
+    void $ C.call_ client (methodCall path "org.freedesktop.DBus.Properties" "Set")
         { methodCallDestination = Just "org.bluez"
         , methodCallBody = [ toVariant target, toVariant name, toVariant (toVariant value) ]
         }
 
-dbusIntrospect :: Client -> BusName -> ObjectPath -> IO I.Object
+dbusIntrospect :: C.Client -> BusName -> ObjectPath -> IO I.Object
 dbusIntrospect client service path = do
-    reply <- call_ client (methodCall path "org.freedesktop.DBus.Introspectable" "Introspect")
+    reply <- C.call_ client (methodCall path "org.freedesktop.DBus.Introspectable" "Introspect")
         { methodCallDestination = Just service
         }
     xml <- either throwIO return $ convertMethodReturn reply
@@ -249,7 +252,7 @@ dbusIntrospect client service path = do
         Just info -> return info
         Nothing   -> throwIO $ invalidDataError "invalid introspection XML" xml
 
-introspectBluez :: Client -> ObjectPath -> IO I.Object
+introspectBluez :: C.Client -> ObjectPath -> IO I.Object
 introspectBluez client = dbusIntrospect client "org.bluez"
 
 convertMethodReturn :: (IsVariant a) => MethodReturn -> Either InvalidDataError a

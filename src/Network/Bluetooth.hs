@@ -38,22 +38,22 @@ import           Data.Typeable      (Typeable)
 newtype DBusClient = DBusClient C.Client
 
 data Device = Device
-    { devObjectPath       :: ObjectPath
-    , devAdapter          :: Maybe ObjectPath
-    , devAddress          :: Maybe String
-    , devAddressType      :: Maybe String
-    , devAlias            :: Maybe String
-    , devBlocked          :: Maybe Bool
-    , devConnected        :: Maybe Bool
-    , devIcon             :: Maybe String
-    , devLegacyPairing    :: Maybe Bool
-    , devModalias         :: Maybe String
-    , devName             :: Maybe String
-    , devPaired           :: Maybe Bool
-    , devServicesResolved :: Maybe Bool
-    , devTrusted          :: Maybe Bool
-    , devWakeAllowed      :: Maybe Bool
-    , devUUIDs            :: Maybe [String]
+    { devObjectPath       :: !ObjectPath
+    , devAdapter          :: !(Maybe ObjectPath)
+    , devAddress          :: !(Maybe String)
+    , devAddressType      :: !(Maybe String)
+    , devAlias            :: !(Maybe String)
+    , devBlocked          :: !(Maybe Bool)
+    , devConnected        :: !(Maybe Bool)
+    , devIcon             :: !(Maybe String)
+    , devLegacyPairing    :: !(Maybe Bool)
+    , devModalias         :: !(Maybe String)
+    , devName             :: !(Maybe String)
+    , devPaired           :: !(Maybe Bool)
+    , devServicesResolved :: !(Maybe Bool)
+    , devTrusted          :: !(Maybe Bool)
+    , devWakeAllowed      :: !(Maybe Bool)
+    , devUUIDs            :: !(Maybe [String])
     }
     deriving (Eq, Show)
 
@@ -68,8 +68,8 @@ bluetoothError :: String -> BluetoothError
 bluetoothError = BluetoothError
 
 data InvalidDataError = InvalidDataError
-    { invalidDataErrorMessage :: String
-    , invalidDataBody         :: String
+    { invalidDataErrorMessage :: !String
+    , invalidDataBody         :: !String
     }
     deriving (Eq, Show, Typeable)
 
